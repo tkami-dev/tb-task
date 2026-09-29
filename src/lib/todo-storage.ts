@@ -92,7 +92,7 @@ function getWebStorage() {
   return (globalThis as typeof globalThis & { localStorage?: WebStorage }).localStorage;
 }
 
-// Dynamic import keeps this native-only module out of the web storage path.
+
 async function readNativeStore() {
   const { File, Paths } = await import('expo-file-system');
   const store = new File(Paths.document, STORE_FILE);
