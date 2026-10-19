@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     Platform,
     StyleSheet,
@@ -22,7 +22,7 @@ import type { TodoItem } from "@/lib/todo-types";
 
 const GAP = Spacing.two;
 const FALLBACK_ITEM_HEIGHT = 68;
-const DRAG_THRESHOLD = 4;
+const LONG_PRESS_MS = 180;
 const LIFT_SCALE = 0.0;
 
 const LAYOUT_SPRING = { duration: 150, dampingRatio: 0.9 };
@@ -57,7 +57,7 @@ function moveItem<T>(items: T[], from: number, to: number) {
   return next;
 }
 
-function DraggableTodoItem({
+function DraggableTodoItemBase({
   todo,
   index,
   targetY,
@@ -86,8 +86,7 @@ function DraggableTodoItem({
   }, [targetY, index, reduceMotion, target, active, curIndex, y]);
 
   const pan = Gesture.Pan()
-    .activeOffsetY([-DRAG_THRESHOLD, DRAG_THRESHOLD])
-    .failOffsetX([-24, 24])
+    .activateAfterLongPress(LONG_PRESS_MS)
     .onStart(() => {
       active.set(true);
       startY.set(y.get());
@@ -163,6 +162,8 @@ function DraggableTodoItem({
     </GestureDetector>
   );
 }
+
+const DraggableTodoItem = memo(DraggableTodoItemBase);
 
 export function DraggableTodoList({
   todos,

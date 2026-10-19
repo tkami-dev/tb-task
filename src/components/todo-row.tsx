@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { Platform, Pressable, StyleSheet, type LayoutChangeEvent, type ViewStyle } from 'react-native';
 import Animated, {
   FadeIn,
@@ -29,7 +29,7 @@ type TodoRowProps = {
   onToggle(id: string): Promise<void>;
   onDelete(id: string): Promise<void>;
 };
-export function TodoRow({ todo, isDragging = false, onToggle, onDelete }: TodoRowProps) {
+function TodoRowBase({ todo, isDragging = false, onToggle, onDelete }: TodoRowProps) {
   const theme = useTheme();
   const reduceMotion = useReducedMotion();
   const checked = useSharedValue(todo.completed ? 1 : 0);
@@ -217,3 +217,5 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
 });
+
+export const TodoRow = memo(TodoRowBase);

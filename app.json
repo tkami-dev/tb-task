@@ -14,7 +14,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.tbtodo"
+      "package": "com.thekami.tbtodo"
     },
     "web": {
       "output": "static",
@@ -46,7 +46,8 @@
       "reactCompiler": true
     },
     "ios": {
-      "bundleIdentifier": "com.anonymous.tbtodo"
-    }
+      "bundleIdentifier": "com.thekami.tbtodo"
+    },
+    "backgroundColor": "#FAFAFA"
   }
 }

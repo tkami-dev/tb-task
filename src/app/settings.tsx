@@ -1,8 +1,11 @@
-import { Link } from 'expo-router';
-import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import { useCallback, useMemo } from 'react';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GoogleSignInButton } from '@/components/google-sign-in-button';
+import { SymbolIcon } from '@/components/symbol-icon';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
@@ -11,69 +14,109 @@ import { useTodos } from '@/hooks/use-todos';
 
 export default function SettingsScreen() {
   const theme = useTheme();
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { google, syncStatus, connectGoogle, disconnectGoogle, syncGoogle } = useTodos();
   const isBusy = syncStatus.kind === 'syncing';
   const isConnected = Boolean(google);
 
+  const goBack = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/');
+    }
+  }, [router]);
+
+  // Left -> right swipe = back.
+  const swipeBack = useMemo(
+    () =>
+      Gesture.Pan()
+        .runOnJS(true)
+        .activeOffsetX([-1000, 24])
+        .failOffsetY([-14, 14])
+        .onEnd((event) => {
+          if (event.translationX > 70 || event.velocityX > 600) {
+            goBack();
+          }
+        }),
+    [goBack],
+  );
+
   return (
-    <ThemedView style={styles.screen}>
-      <SafeAreaView style={styles.safeArea}>
-        <ScrollView
-          contentContainerStyle={styles.content}
-          showsVerticalScrollIndicator={false}>
-          <View style={styles.header}>
-            <Link href="/" asChild>
-              <Pressable hitSlop={12} style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
-                <ThemedText type="smallBold" themeColor="textSecondary">
-                  Back
-                </ThemedText>
+    <GestureDetector gesture={swipeBack}>
+      <View style={styles.screen}>
+        <ThemedView style={styles.screen}>
+          <ScrollView
+            style={styles.screen}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={[
+              styles.content,
+              {
+                paddingTop: insets.top + Spacing.four,
+                paddingBottom: insets.bottom + Spacing.five,
+                paddingLeft: insets.left + Spacing.four,
+                paddingRight: insets.right + Spacing.four,
+              },
+            ]}>
+            <View style={styles.header}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Back"
+                hitSlop={12}
+                onPress={goBack}
+                style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
+                <SymbolIcon
+                  name={{ ios: 'chevron.left', android: 'chevron_left', web: 'chevron_left' }}
+                  size={30}
+                />
               </Pressable>
-            </Link>
-            <View style={styles.titleBlock}>
-              <ThemedText type="title" style={styles.title}>
-                Settings
-              </ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">
-                Sync your tasks with Google Tasks.
-              </ThemedText>
-            </View>
-          </View>
-
-          <View style={[styles.section, { borderColor: theme.border }]}>
-            <View style={styles.rowBetween}>
-              <ThemedText type="smallBold">Google Tasks</ThemedText>
-              <ThemedText type="small" themeColor={isConnected ? 'success' : 'textSecondary'}>
-                {isConnected ? 'Connected' : 'Not connected'}
-              </ThemedText>
-            </View>
-
-            {isConnected ? (
-              <>
-                <View style={styles.actions}>
-                  <SettingsButton label="Sync" disabled={isBusy} onPress={syncGoogle} />
-                  <SettingsButton label="Disconnect" disabled={isBusy} onPress={disconnectGoogle} />
-                </View>
-                <ThemedText type="small" themeColor="textSecondary">
-                  {google?.lastSyncAt
-                    ? `Last synced ${new Date(google.lastSyncAt).toLocaleString()}`
-                    : 'Not synced yet'}
+              <View style={styles.titleBlock}>
+                <ThemedText type="title" style={styles.title}>
+                  Settings
                 </ThemedText>
-              </>
-            ) : (
-              <GoogleSignInButton disabled={isBusy} onPress={connectGoogle} />
-            )}
+                <ThemedText type="small" themeColor="textSecondary">
+                  Sync your tasks with Google Tasks.
+                </ThemedText>
+              </View>
+            </View>
 
-            {syncStatus.message && (
-              <ThemedText
-                type="small"
-                style={{ color: syncStatus.kind === 'error' ? theme.danger : theme.textSecondary }}>
-                {syncStatus.message}
-              </ThemedText>
-            )}
-          </View>
-        </ScrollView>
-      </SafeAreaView>
-    </ThemedView>
+            <View style={[styles.section, { borderColor: theme.border }]}>
+              <View style={styles.rowBetween}>
+                <ThemedText type="smallBold">Google Tasks</ThemedText>
+                <ThemedText type="small" themeColor={isConnected ? 'success' : 'textSecondary'}>
+                  {isConnected ? 'Connected' : 'Not connected'}
+                </ThemedText>
+              </View>
+
+              {isConnected ? (
+                <>
+                  <View style={styles.actions}>
+                    <SettingsButton label="Sync" disabled={isBusy} onPress={syncGoogle} />
+                    <SettingsButton label="Disconnect" disabled={isBusy} onPress={disconnectGoogle} />
+                  </View>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    {google?.lastSyncAt
+                      ? `Last synced ${new Date(google.lastSyncAt).toLocaleString()}`
+                      : 'Not synced yet'}
+                  </ThemedText>
+                </>
+              ) : (
+                <GoogleSignInButton disabled={isBusy} onPress={connectGoogle} />
+              )}
+
+              {syncStatus.message && (
+                <ThemedText
+                  type="small"
+                  style={{ color: syncStatus.kind === 'error' ? theme.danger : theme.textSecondary }}>
+                  {syncStatus.message}
+                </ThemedText>
+              )}
+            </View>
+          </ScrollView>
+        </ThemedView>
+      </View>
+    </GestureDetector>
   );
 }
 
@@ -110,17 +153,11 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
   },
-  safeArea: {
-    flex: 1,
+  content: {
     width: '100%',
     maxWidth: MaxContentWidth,
     alignSelf: 'center',
-  },
-  content: {
     gap: Spacing.four,
-    paddingHorizontal: Spacing.four,
-    paddingTop: Platform.select({ web: Spacing.six, default: Spacing.four }),
-    paddingBottom: Spacing.four,
   },
   header: {
     gap: Spacing.three,
@@ -132,13 +169,16 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   backButton: {
-    alignSelf: 'flex-start',
-    minHeight: 32,
+    width: 44,
+    height: 44,
+    alignItems: 'flex-start',
     justifyContent: 'center',
+    marginLeft: -Spacing.one,
   },
   title: {
-    fontSize: 38,
-    lineHeight: 42,
+    fontSize: 40,
+    lineHeight: 44,
+    fontFamily: 'Ubuntu-Bold',
   },
   section: {
     gap: Spacing.three,

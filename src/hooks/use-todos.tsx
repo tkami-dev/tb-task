@@ -54,10 +54,32 @@ function getInitialOrder(todos: TodoItem[]) {
   return Math.min(...todos.map((todo) => todo.order ?? -Date.parse(todo.createdAt))) - 1;
 }
 
+// Sync cholar somoy user je change korse seta overwrite na kore merge kore.
+function mergeSynced(latest: TodoData, source: TodoData, synced: TodoData): TodoData {
+  if (!latest.google) return latest;
+  if (latest === source) return synced;
+
+  const sourceById = new Map(source.todos.map((todo) => [todo.id, todo]));
+  const syncedById = new Map(synced.todos.map((todo) => [todo.id, todo]));
+  const latestIds = new Set(latest.todos.map((todo) => todo.id));
+
+  const todos = latest.todos.map((todo) => {
+    const remote = syncedById.get(todo.id);
+    if (!remote) return todo;
+    if (sourceById.get(todo.id)?.updatedAt === todo.updatedAt) return remote;
+    return { ...todo, googleTaskId: remote.googleTaskId ?? todo.googleTaskId };
+  });
+  const pulled = synced.todos.filter((todo) => !latestIds.has(todo.id) && !sourceById.has(todo.id));
+
+  return { ...synced, todos: [...todos, ...pulled] };
+}
+
 export function TodoProvider({ children }: PropsWithChildren) {
   const [data, setData] = useState<TodoData>(EMPTY_TODO_DATA);
   const [isReady, setReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({ kind: 'loading', message: 'Loading tasks' });
+  const dataRef = useRef<TodoData>(EMPTY_TODO_DATA);
+  const saveChain = useRef<Promise<unknown>>(Promise.resolve());
   const syncInFlight = useRef(false);
 
   useEffect(() => {
@@ -69,7 +91,9 @@ export function TodoProvider({ children }: PropsWithChildren) {
           return;
         }
 
-        setData({ ...storedData, todos: sortTodos(storedData.todos) });
+        const loaded = { ...storedData, todos: sortTodos(storedData.todos) };
+        dataRef.current = loaded;
+        setData(loaded);
         setSyncStatus({ kind: 'idle' });
       })
       .catch((error) => {
@@ -93,36 +117,52 @@ export function TodoProvider({ children }: PropsWithChildren) {
     };
   }, []);
 
-  const commit = useCallback(async (nextData: TodoData) => {
-    const normalizedData = { ...nextData, todos: sortTodos(nextData.todos) };
-    setData(normalizedData);
-    await saveTodoData(normalizedData);
+  const commit = useCallback((nextData: TodoData) => {
+    const normalized = { ...nextData, todos: sortTodos(nextData.todos) };
+    dataRef.current = normalized;
+    setData(normalized);
+
+    const saved = saveChain.current.catch(() => undefined).then(() => saveTodoData(normalized));
+    saveChain.current = saved;
+
+    return saved.then(() => normalized);
   }, []);
 
-  const runGoogleSync = useCallback(
-    async (sourceData: TodoData) => {
-      if (!sourceData.google || syncInFlight.current) {
-        return;
+  const runGoogleSync = useCallback(async () => {
+    if (syncInFlight.current) {
+      return;
+    }
+
+    syncInFlight.current = true;
+
+    try {
+      let again = true;
+
+      while (again) {
+        const source = dataRef.current;
+
+        if (!source.google) {
+          break;
+        }
+
+        setSyncStatus({ kind: 'syncing', message: 'Syncing Google Tasks' });
+        const synced = await syncTodosWithGoogle(source);
+        const latest = dataRef.current;
+
+        again = latest !== source;
+        await commit(mergeSynced(latest, source, synced));
       }
 
-      syncInFlight.current = true;
-      setSyncStatus({ kind: 'syncing', message: 'Syncing Google Tasks' });
-
-      try {
-        const syncedData = await syncTodosWithGoogle(sourceData);
-        await commit(syncedData);
-        setSyncStatus({ kind: 'success', message: 'Synced with Google Tasks' });
-      } catch (error) {
-        setSyncStatus({
-          kind: 'error',
-          message: error instanceof Error ? error.message : 'Google sync failed.',
-        });
-      } finally {
-        syncInFlight.current = false;
-      }
-    },
-    [commit],
-  );
+      setSyncStatus({ kind: 'success', message: 'Synced with Google Tasks' });
+    } catch (error) {
+      setSyncStatus({
+        kind: 'error',
+        message: error instanceof Error ? error.message : 'Google sync failed.',
+      });
+    } finally {
+      syncInFlight.current = false;
+    }
+  }, [commit]);
 
   const addTodo = useCallback(
     async (title: string) => {
@@ -132,99 +172,96 @@ export function TodoProvider({ children }: PropsWithChildren) {
         return;
       }
 
-      const nextData = {
-        ...data,
-        todos: [createTodo(cleanTitle, getInitialOrder(data.todos)), ...data.todos],
-      };
-      await commit(nextData);
-      void runGoogleSync(nextData);
+      const current = dataRef.current;
+      await commit({
+        ...current,
+        todos: [createTodo(cleanTitle, getInitialOrder(current.todos)), ...current.todos],
+      });
+      void runGoogleSync();
     },
-    [commit, data, runGoogleSync],
+    [commit, runGoogleSync],
   );
 
   const toggleTodo = useCallback(
     async (id: string) => {
       const now = new Date().toISOString();
-      const nextData = {
-        ...data,
-        todos: data.todos.map((todo) =>
+      const current = dataRef.current;
+
+      await commit({
+        ...current,
+        todos: current.todos.map((todo) =>
           todo.id === id ? { ...todo, completed: !todo.completed, updatedAt: now } : todo,
         ),
-      };
-
-      await commit(nextData);
-      void runGoogleSync(nextData);
+      });
+      void runGoogleSync();
     },
-    [commit, data, runGoogleSync],
+    [commit, runGoogleSync],
   );
 
   const deleteTodo = useCallback(
     async (id: string) => {
       const now = new Date().toISOString();
-      const nextTodos = data.google
-        ? data.todos
+      const current = dataRef.current;
+      const nextTodos = current.google
+        ? current.todos
             .map((todo) => (todo.id === id ? { ...todo, deletedAt: now, updatedAt: now } : todo))
             .filter((todo) => todo.id !== id || todo.googleTaskId)
-        : data.todos.filter((todo) => todo.id !== id);
-      const nextData = { ...data, todos: nextTodos };
+        : current.todos.filter((todo) => todo.id !== id);
 
-      await commit(nextData);
-      void runGoogleSync(nextData);
+      await commit({ ...current, todos: nextTodos });
+      void runGoogleSync();
     },
-    [commit, data, runGoogleSync],
+    [commit, runGoogleSync],
   );
 
   const reorderTodos = useCallback(
     async (orderedIds: string[]) => {
       const now = new Date().toISOString();
       const orderById = new Map(orderedIds.map((id, index) => [id, index]));
-      const nextData = {
-        ...data,
-        todos: data.todos.map((todo) => {
+      const current = dataRef.current;
+
+      await commit({
+        ...current,
+        todos: current.todos.map((todo) => {
           const order = orderById.get(todo.id);
 
           return order === undefined ? todo : { ...todo, order, updatedAt: now };
         }),
-      };
-
-      await commit(nextData);
-      void runGoogleSync(nextData);
+      });
+      void runGoogleSync();
     },
-    [commit, data, runGoogleSync],
+    [commit, runGoogleSync],
   );
 
-  const connectGoogle = useCallback(
-    async () => {
-      setSyncStatus({ kind: 'syncing', message: 'Connecting Google Tasks' });
+  const connectGoogle = useCallback(async () => {
+    setSyncStatus({ kind: 'syncing', message: 'Connecting Google Tasks' });
 
-      try {
-        const google = await connectGoogleTasks();
-        const syncedData = await syncTodosWithGoogle({ ...data, google });
-        await commit(syncedData);
-        setSyncStatus({ kind: 'success', message: 'Connected to Google Tasks' });
-      } catch (error) {
-        setSyncStatus({
-          kind: 'error',
-          message: error instanceof Error ? error.message : 'Google connection failed.',
-        });
-      }
-    },
-    [commit, data],
-  );
+    try {
+      const google = await connectGoogleTasks();
+      const base = { ...dataRef.current, google };
+      const synced = await syncTodosWithGoogle(base);
+
+      await commit(mergeSynced({ ...dataRef.current, google }, base, synced));
+      setSyncStatus({ kind: 'success', message: 'Connected to Google Tasks' });
+    } catch (error) {
+      setSyncStatus({
+        kind: 'error',
+        message: error instanceof Error ? error.message : 'Google connection failed.',
+      });
+    }
+  }, [commit]);
 
   const disconnectGoogle = useCallback(async () => {
-    const nextData = {
-      todos: stripGoogleIds(getVisibleTodos(data.todos)),
+    await commit({
+      todos: stripGoogleIds(getVisibleTodos(dataRef.current.todos)),
       google: null,
-    } satisfies TodoData;
-
-    await commit(nextData);
+    } satisfies TodoData);
     setSyncStatus({ kind: 'idle' });
-  }, [commit, data.todos]);
+  }, [commit]);
 
   const syncGoogle = useCallback(async () => {
-    await runGoogleSync(data);
-  }, [data, runGoogleSync]);
+    await runGoogleSync();
+  }, [runGoogleSync]);
 
   const visibleTodos = useMemo(() => sortTodos(getVisibleTodos(data.todos)), [data.todos]);
   const completedCount = visibleTodos.filter((todo) => todo.completed).length;
